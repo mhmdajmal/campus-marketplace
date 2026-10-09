@@ -1,647 +1,146 @@
-import { StatusBar } from "expo-status-bar";
-import {
-  GoogleAuthProvider,
-  browserLocalPersistence,
-  getRedirectResult,
-  onAuthStateChanged,
-  setPersistence,
-  signInAnonymously,
-  signInWithPopup,
-  signInWithRedirect,
-  signOut,
-  User,
-} from "firebase/auth";
-import {
-  addDoc,
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Image,
-  Modal,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { EmptyState } from "./components/EmptyState";
-import { ExplorePage } from "./pages/ExplorePage";
-import { MessagesPage } from "./pages/MessagesPage";
-import { MyListingsPage } from "./pages/MyListingsPage";
-import { ProfilePage } from "./pages/ProfilePage";
-import { SavedPage } from "./pages/SavedPage";
-import { seedListings } from "./data";
-import { auth, db, firebaseConfigured } from "./firebase";
-import { Listing, Tab } from "./types";
+import React,{useEffect,useMemo,useState} from 'react';
+import {ActivityIndicator,Alert,Platform,Pressable,SafeAreaView,Text,View} from 'react-native';
+import {StatusBar} from 'expo-status-bar';
+import {Ionicons} from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {onAuthStateChanged,reload,User} from 'firebase/auth';
+import {auth,db,firebaseReady} from './firebase';
+import {C,S} from './theme';
+import {demoListings} from './data';
+import {Conversation,Listing,Profile,Tab} from './types';
+import Explore from './screens/Explore';
+import Saved from './screens/Saved';
+import Sell from './screens/Sell';
+import Detail from './screens/Detail';
+import AuthScreen from './screens/Auth';
+import {Chat,Inbox} from './screens/Messages';
+import ProfilePage from './screens/Profile';
+import {Button,Empty} from './components/UI';
+import {readableError,setSaved,startConversation,syncProfile,watchConversations,watchListings,watchProfile,watchSaved} from './services/market';
 
-async function registerUser(user: User) {
-  if (!db) return;
-  await setDoc(
-    doc(db, "users", user.uid),
-    {
-      uid: user.uid,
-      displayName:
-        user.displayName || user.email?.split("@")[0] || "Campus student",
-      email: user.email || "",
-      photoURL: user.photoURL || null,
-      campus: "North Campus",
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-}
+const notice=(title:string,msg:string)=>Platform.OS==='web'?window.alert(`${title}: ${msg}`):Alert.alert(title,msg);
 
-export default function App() {
-  const [tab, setTab] = useState<Tab>("Explore");
-  const [items, setItems] = useState(seedListings);
-  const [queryText, setQueryText] = useState("");
-  const [category, setCategory] = useState("All items");
-  const [savedIds, setSavedIds] = useState<string[]>([]);
-  const [selected, setSelected] = useState<Listing | null>(null);
-  const [user, setUser] = useState<User | null>(auth?.currentUser || null);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [sellOpen, setSellOpen] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [profileReady, setProfileReady] = useState(false);
+const tabs:{name:Tab;icon:React.ComponentProps<typeof Ionicons>['name'];active:React.ComponentProps<typeof Ionicons>['name']}[]=[
+  {name:'Explore',icon:'compass-outline',active:'compass'},
+  {name:'Saved',icon:'heart-outline',active:'heart'},
+  {name:'Sell',icon:'add-circle-outline',active:'add-circle'},
+  {name:'Messages',icon:'chatbubbles-outline',active:'chatbubbles'},
+  {name:'Profile',icon:'person-outline',active:'person'},
+];
 
-  useEffect(() => {
-    const firebaseAuth = auth;
-    if (!firebaseAuth) return;
-    const handleUser = (nextUser: User | null) => {
-      setUser(nextUser);
-      if (nextUser)
-        registerUser(nextUser)
-          .then(() => setProfileReady(true))
-          .catch((error) =>
-            setAuthError(
-              error instanceof Error
-                ? error.message
-                : "Could not create profile.",
-            ),
-          );
-      else setProfileReady(false);
-    };
-    let unsubscribe: () => void = () => undefined;
-    setPersistence(firebaseAuth, browserLocalPersistence)
-      .then(() => {
-        unsubscribe = onAuthStateChanged(firebaseAuth, handleUser);
-        return getRedirectResult(firebaseAuth);
-      })
-      .then((result) => {
-        if (result?.user) handleUser(result.user);
-      })
-      .catch((error) =>
-        setAuthError(
-          error instanceof Error
-            ? error.message
-            : "Google sign-in could not be completed.",
-        ),
-      );
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!db) return;
-    const listingsQuery = query(
-      collection(db, "listings"),
-      orderBy("createdAt", "desc"),
-    );
-    return onSnapshot(
-      listingsQuery,
-      (snapshot) =>
-        setItems(
-          snapshot.empty
-            ? seedListings
-            : snapshot.docs.map(
-                (entry) => ({ id: entry.id, ...entry.data() }) as Listing,
-              ),
-        ),
-      () => setItems(seedListings),
-    );
-  }, []);
-
-  const filteredItems = useMemo(
-    () =>
-      items.filter(
-        (item) =>
-          (category === "All items" || item.category === category) &&
-          item.title.toLowerCase().includes(queryText.toLowerCase()),
-      ),
-    [category, items, queryText],
-  );
-  const myListings = useMemo(
-    () => (user ? items.filter((item) => item.sellerId === user.uid) : []),
-    [items, user],
-  );
-  const toggleSaved = (id: string) =>
-    setSavedIds((current) =>
-      current.includes(id)
-        ? current.filter((value) => value !== id)
-        : [...current, id],
-    );
-  const signInWithGoogle = async () => {
-    if (!auth) return;
-    setAuthError("");
-    try {
-      await setPersistence(auth, browserLocalPersistence);
-      if (Platform.OS === "web") {
-        const result = await signInWithPopup(auth, new GoogleAuthProvider());
-        await registerUser(result.user);
-        setUser(result.user);
-        setProfileReady(true);
-        setAuthOpen(false);
-      } else {
-        await signInAnonymously(auth);
-        setAuthOpen(false);
-      }
-    } catch (error) {
-      const code =
-        error instanceof Error ? error.message : "Google sign-in failed.";
-      if (
-        Platform.OS === "web" &&
-        /popup|cancelled-popup-request/i.test(code)
-      ) {
-        await signInWithRedirect(auth, new GoogleAuthProvider());
-        return;
-      }
-      setAuthError(code);
-      Alert.alert("Google sign-in failed", code);
-    }
-  };
-  const publish = async (
-    title: string,
-    price: string,
-    listingCategory: string,
-  ) => {
-    if (!user) {
-      setSellOpen(false);
-      setAuthOpen(true);
+export default function App(){
+  const [tab,setTab]=useState<Tab>('Explore');
+  const [items,setItems]=useState<Listing[]>(firebaseReady?[]:demoListings);
+  const [user,setUser]=useState<User|null>(null);const [verified,setVerified]=useState(false);
+  const [authReady,setAuthReady]=useState(!firebaseReady);
+  const [savedIds,setSavedIds]=useState<string[]>([]);
+  const [profile,setProfile]=useState<Profile|null>(null);
+  const [conversations,setConversations]=useState<Conversation[]>([]);
+  const [authOpen,setAuthOpen]=useState(false);
+  const [verifyOpen,setVerifyOpen]=useState(false);
+  const [detail,setDetail]=useState<Listing|null>(null);
+  const [editing,setEditing]=useState<Listing|null>(null);
+  const [chatId,setChatId]=useState<string|null>(null);
+  const [chatTitle,setChatTitle]=useState('Chat');
+  const [busy,setBusy]=useState(false);
+  const [feedError,setFeedError]=useState('');
+  useEffect(()=>{
+    if(!auth){
+      AsyncStorage.getItem('campus-market-demo-saved').then(v=>{if(v)setSavedIds(JSON.parse(v) as string[]);}).catch(e=>console.warn('Local saves:',e));
       return;
     }
-    await addDoc(collection(db!, "listings"), {
-      title,
-      price: Number(price),
-      category: listingCategory,
-      seller: user.displayName || user.email || "You",
-      sellerId: user.uid,
-      campus: "North Campus",
-      condition: "Good condition",
-      image: seedListings[0].image,
-      description: "New listing from a campus seller.",
-      createdAt: serverTimestamp(),
+    return onAuthStateChanged(auth,u=>{
+      setUser(u);setVerified(Boolean(u?.emailVerified));setAuthReady(true);
+      if(u && !u.emailVerified) setVerifyOpen(true);
+      if(!u){setProfile(null);setConversations([]);setSavedIds([]);}
     });
-    setSellOpen(false);
+  },[]);
+  useEffect(()=>{
+    if(!db)return;
+    return watchListings(setItems,e=>{console.warn('Listing sync:',e);setFeedError(readableError(e));});
+  },[]);
+  useEffect(()=>{
+    if(!user||!verified||!db)return;
+    syncProfile(user).catch(e=>{console.warn('Profile sync:',e);notice('Profile error',readableError(e));});
+    const stopProfile=watchProfile(user.uid,setProfile,e=>console.warn('Profile listener:',e));
+    const stopSaved=watchSaved(user.uid,setSavedIds,e=>console.warn('Saved listener:',e));
+    const stopChats=watchConversations(user.uid,setConversations,e=>console.warn('Chat listener:',e));
+    return ()=>{stopProfile();stopSaved();stopChats();};
+  },[user?.uid,verified]);
+  // Keep selected detail up to date after live edits or marking sold.
+  const selectedDetail=useMemo(()=>detail?(items.find(item=>item.id===detail.id)??detail):null,[detail,items]);
+  const verifiedUser=Boolean(user && verified);
+  const requireVerified=()=>{
+    if(!firebaseReady){notice('Demo preview','Add Firebase keys in .env to enable real accounts, posting and messages.');return false;}
+    if(!user){setAuthOpen(true);return false;}
+    if(!verified){setVerifyOpen(true);return false;}
+    return true;
   };
-  const contactSeller = () => {
-    if (!user) {
-      setAuthOpen(true);
+  const openTab=(next:Tab)=>{
+    if((next==='Sell'||next==='Messages')&&!requireVerified())return;
+    setEditing(null);setDetail(null);setChatId(null);setTab(next);
+  };
+  const toggleSaved=async(id:string)=>{
+    const save=!savedIds.includes(id);
+    if(!firebaseReady||!user){
+      const next=save?[...savedIds,id]:savedIds.filter(x=>x!==id);
+      setSavedIds(next);AsyncStorage.setItem('campus-market-demo-saved',JSON.stringify(next)).catch(e=>console.warn(e));
       return;
     }
-    setSelected(null);
-    setTab("Messages");
+    if(!verified){setVerifyOpen(true);return;}
+    try{await setSaved(id,save);}catch(e){notice('Save failed',readableError(e));}
   };
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
-      {tab === "Explore" && (
-        <ExplorePage
-          items={filteredItems}
-          query={queryText}
-          category={category}
-          savedIds={savedIds}
-          onQueryChange={setQueryText}
-          onCategoryChange={setCategory}
-          onSave={toggleSaved}
-          onOpen={setSelected}
-          onProfile={() => setTab("Profile")}
-        />
-      )}
-      {tab === "Saved" && (
-        <SavedPage
-          items={items.filter((item) => savedIds.includes(item.id))}
-          onSave={toggleSaved}
-          onOpen={setSelected}
-        />
-      )}
-      {tab === "Messages" && (
-        <MessagesPage onBrowse={() => setTab("Explore")} />
-      )}
-      {tab === "MyListings" && (
-        <MyListingsPage
-          items={myListings}
-          onOpen={setSelected}
-          onSell={() => setSellOpen(true)}
-        />
-      )}
-      {tab === "Profile" && (
-        <ProfilePage
-          user={user}
-          savedCount={savedIds.length}
-          listingCount={myListings.length}
-          firebaseConfigured={firebaseConfigured}
-          profileReady={profileReady}
-          error={authError}
-          onMyListings={() => (user ? setTab("MyListings") : setAuthOpen(true))}
-          onSaved={() => setTab("Saved")}
-          onSignIn={() => setAuthOpen(true)}
-          onSignOut={() => auth && signOut(auth)}
-        />
-      )}
-      <BottomNav
-        tab={tab}
-        savedCount={savedIds.length}
-        onChange={setTab}
-        onSell={() => setSellOpen(true)}
-      />
-      <ListingModal
-        item={selected}
-        user={user}
-        onClose={() => setSelected(null)}
-        onContact={contactSeller}
-      />
-      <AuthModal
-        visible={authOpen}
-        onClose={() => setAuthOpen(false)}
-        onSignIn={signInWithGoogle}
-        error={authError}
-      />
-      <SellModal
-        visible={sellOpen}
-        onClose={() => setSellOpen(false)}
-        onSubmit={publish}
-      />
-    </SafeAreaView>
-  );
-}
-
-function BottomNav({
-  tab,
-  savedCount,
-  onChange,
-  onSell,
-}: {
-  tab: Tab;
-  savedCount: number;
-  onChange: (tab: Tab) => void;
-  onSell: () => void;
-}) {
-  return (
-    <View style={styles.nav}>
-      <NavItem
-        label="Explore"
-        icon="⌂"
-        active={tab === "Explore"}
-        onPress={() => onChange("Explore")}
-      />
-      <NavItem
-        label="Saved"
-        icon="♡"
-        active={tab === "Saved"}
-        badge={savedCount}
-        onPress={() => onChange("Saved")}
-      />
-      <NavItem
-        label="Messages"
-        icon="□"
-        active={tab === "Messages"}
-        onPress={() => onChange("Messages")}
-      />
-      <Pressable style={styles.sellButton} onPress={onSell}>
-        <Text style={styles.sellPlus}>＋</Text>
-        <Text style={styles.sellText}>Sell</Text>
-      </Pressable>
-    </View>
-  );
-}
-function NavItem({
-  label,
-  icon,
-  active,
-  badge,
-  onPress,
-}: {
-  label: string;
-  icon: string;
-  active: boolean;
-  badge?: number;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable style={styles.navItem} onPress={onPress}>
-      <View>
-        <Text style={[styles.navIcon, active && styles.navActive]}>{icon}</Text>
-        {badge ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{badge}</Text>
-          </View>
-        ) : null}
+  const contact=async(item:Listing)=>{
+    if(!requireVerified())return;
+    setBusy(true);
+    try{const id=await startConversation(item);setChatId(id);setChatTitle(item.title);setDetail(null);setTab('Messages');}
+    catch(e){notice('Could not open chat',readableError(e));}finally{setBusy(false);}
+  };
+  const refreshVerification=async()=>{
+    if(!user)return;
+    setBusy(true);
+    try{
+      await reload(user);await user.getIdToken(true);
+      const yes=user.emailVerified;
+      setVerified(yes);
+      if(yes){await syncProfile(user);setVerifyOpen(false);notice('Verified','Your account is ready!');}
+      else notice('Not verified yet','Open the verification link in Gmail, then try again.');
+    }catch(e){notice('Verification error',readableError(e));}finally{setBusy(false);}
+  };
+  const activeChat=conversations.find(c=>c.id===chatId);
+  if(!authReady)return <SafeAreaView style={[S.page,{justifyContent:'center'}]}><ActivityIndicator size="large" color={C.green}/></SafeAreaView>;
+  return <SafeAreaView style={{flex:1,backgroundColor:C.bg}}>
+    <StatusBar style="dark"/>
+    {authOpen?<AuthScreen close={()=>setAuthOpen(false)}/>:
+     verifyOpen&&user&&!verified?<View style={[S.page,{padding:25,justifyContent:'center'}]}>
+       <View style={{backgroundColor:C.mint,width:85,height:85,borderRadius:30,alignItems:'center',justifyContent:'center',marginBottom:22}}><Ionicons name="mail-open-outline" size={42} color={C.green}/></View>
+       <Text style={S.h1}>Verify your Gmail</Text><Text style={[S.sub,{marginTop:10,marginBottom:24,fontSize:14,lineHeight:23}]}>We sent a verification link to {user.email}. Open Gmail, click the link, return here and tap “I've verified”.</Text>
+       <Button label={busy?'Checking...':"I've verified my email"} disabled={busy} icon="checkmark-circle-outline" onPress={refreshVerification}/>
+       <View style={{height:11}}/><Button label="Continue browsing" secondary onPress={()=>setVerifyOpen(false)}/>
+       <Pressable style={{marginTop:24}} onPress={async()=>{try{const {sendEmailVerification}=await import('firebase/auth');await sendEmailVerification(user);notice('Sent','Check your Gmail for the new verification email.');}catch(e){notice('Error',readableError(e));}}}><Text style={{textAlign:'center',color:C.green,fontWeight:'800'}}>Resend verification email</Text></Pressable>
+       <Pressable style={{marginTop:30}} onPress={async()=>{try{await auth?.signOut();setVerifyOpen(false);}catch(e){notice('Error',readableError(e));}}}><Text style={{textAlign:'center',color:C.muted}}>Use another account</Text></Pressable>
+     </View>:
+     chatId&&user?<Chat id={chatId} uid={user.uid} title={activeChat?.listingTitle||chatTitle} conversation={activeChat} back={()=>setChatId(null)}/>:
+     selectedDetail?<Detail item={selectedDetail} back={()=>setDetail(null)} saved={savedIds.includes(selectedDetail.id)} onSave={()=>toggleSaved(selectedDetail.id)}
+       onContact={()=>contact(selectedDetail)} onEdit={()=>{if(requireVerified()){setEditing(selectedDetail);setDetail(null);setTab('Sell');}}}
+       canInteract={verifiedUser} own={user?.uid===selectedDetail.sellerId}/>:
+     tab==='Sell'&&verifiedUser?<Sell key={editing?.id??'new'} editing={editing} cancel={()=>{setEditing(null);setTab('Explore');}}
+       done={()=>{setEditing(null);setTab('Profile');}}/>:
+     tab==='Explore'?<Explore items={items} saved={savedIds} onOpen={setDetail} onSave={toggleSaved} onSell={()=>openTab('Sell')}/>:
+     tab==='Saved'?<Saved items={items} saved={savedIds} onOpen={setDetail} onSave={toggleSaved}/>:
+     tab==='Messages'?<Inbox conversations={conversations} uid={user?.uid??''} onChat={id=>{setChatId(id);setChatTitle(conversations.find(c=>c.id===id)?.listingTitle??'Chat');}}/>:
+     <ProfilePage key={profile?.campus??'profile'} user={verifiedUser?user:null} profile={profile} items={items} open={setDetail}
+       edit={item=>{if(requireVerified()){setEditing(item);setTab('Sell');}}} onLogin={()=>{if(user&&!verified)setVerifyOpen(true);else setAuthOpen(true);}}/>}
+    {(!authOpen&&!verifyOpen&&!chatId&&!selectedDetail)&&<View style={{backgroundColor:C.white,borderTopColor:C.border,borderTopWidth:1,paddingTop:8,paddingBottom:7,flexDirection:'row',justifyContent:'center'}}>
+      <View style={{flexDirection:'row',width:'100%',maxWidth:960}}>
+        {tabs.map(t=><Pressable accessibilityRole="tab" accessibilityState={{selected:tab===t.name}} key={t.name} onPress={()=>openTab(t.name)} style={{flex:1,alignItems:'center',justifyContent:'center',paddingVertical:4,gap:5}}>
+          {t.name==='Sell'?<View style={{backgroundColor:C.yellow,borderRadius:17,height:48,width:50,alignItems:'center',justifyContent:'center',marginTop:-8}}><Ionicons name="add" size={29} color={C.dark}/></View>:
+            <View style={{backgroundColor:tab===t.name?C.mint:'transparent',borderRadius:15,width:47,height:43,alignItems:'center',justifyContent:'center'}}><Ionicons name={tab===t.name?t.active:t.icon} size={23} color={tab===t.name?C.green:C.muted}/></View>}
+          <Text style={{fontSize:10,fontWeight:tab===t.name?'900':'700',color:tab===t.name?C.green:C.muted}}>{t.name}</Text>
+        </Pressable>)}
       </View>
-      <Text style={[styles.navLabel, active && styles.navActive]}>{label}</Text>
-    </Pressable>
-  );
+    </View>}
+    {Boolean(feedError)&&!authOpen&&<Pressable onPress={()=>setFeedError('')} style={{backgroundColor:'#FDEFE9',paddingHorizontal:15,paddingVertical:6}}><Text style={{color:C.red,fontSize:11}}>{feedError} (tap to dismiss)</Text></Pressable>}
+    {!firebaseReady&&!authOpen&&!selectedDetail&&<View style={{backgroundColor:'#FFEEB3',paddingHorizontal:14,paddingVertical:5}}><Text style={{fontSize:10,color:C.navy,textAlign:'center'}}>DEMO MODE · Connect Firebase to enable real listings and accounts</Text></View>}
+  </SafeAreaView>;
 }
-function ListingModal({
-  item,
-  user,
-  onClose,
-  onContact,
-}: {
-  item: Listing | null;
-  user: User | null;
-  onClose: () => void;
-  onContact: () => void;
-}) {
-  return (
-    <Modal
-      visible={item !== null}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      {item && (
-        <View style={styles.backdrop}>
-          <View style={styles.detail}>
-            <Image source={{ uri: item.image }} style={styles.detailImage} />
-            <Pressable style={styles.close} onPress={onClose}>
-              <Text style={styles.closeText}>×</Text>
-            </Pressable>
-            <View style={styles.detailBody}>
-              <Text style={styles.detailCategory}>
-                {item.category.toUpperCase()}
-              </Text>
-              <Text style={styles.detailTitle}>{item.title}</Text>
-              <Text style={styles.detailPrice}>${item.price}</Text>
-              <Text style={styles.muted}>
-                {item.condition} · {item.campus} · {item.seller}
-              </Text>
-              <Text style={styles.description}>{item.description}</Text>
-              <Pressable style={styles.primary} onPress={onContact}>
-                <Text style={styles.primaryText}>
-                  {user
-                    ? `Message ${item.seller}`
-                    : "Sign in to contact seller"}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      )}
-    </Modal>
-  );
-}
-function AuthModal({
-  visible,
-  onClose,
-  onSignIn,
-  error,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSignIn: () => Promise<void>;
-  error: string;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.backdrop}>
-        <View style={styles.auth}>
-          <Text style={styles.formTitle}>Welcome to campus marketplace</Text>
-          <Text style={styles.authMessage}>
-            Sign in to save listings, message sellers, and publish your own
-            items.
-          </Text>
-          {error ? <Text style={styles.authError}>{error}</Text> : null}
-          <Pressable style={styles.googleButton} onPress={onSignIn}>
-            <Text style={styles.googleMark}>G</Text>
-            <Text style={styles.outlineText}>Continue with Google</Text>
-          </Pressable>
-          <Pressable style={styles.outline} onPress={onClose}>
-            <Text style={styles.outlineText}>Maybe later</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-function SellModal({
-  visible,
-  onClose,
-  onSubmit,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSubmit: (title: string, price: string, category: string) => Promise<void>;
-}) {
-  const [title, setTitle] = useState("");
-  const [price, setPrice] = useState("");
-  const [category, setCategory] = useState("Textbooks");
-  return (
-    <Modal visible={visible} transparent animationType="slide">
-      <View style={styles.backdrop}>
-        <View style={styles.form}>
-          <View style={styles.formHeader}>
-            <Text style={styles.formTitle}>Sell an item</Text>
-            <Pressable onPress={onClose}>
-              <Text style={styles.closeText}>×</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.label}>What are you selling?</Text>
-          <TextInput
-            value={title}
-            onChangeText={setTitle}
-            placeholder="e.g. Organic Chemistry textbook"
-            style={styles.field}
-          />
-          <Text style={styles.label}>Price</Text>
-          <TextInput
-            value={price}
-            onChangeText={setPrice}
-            keyboardType="numeric"
-            placeholder="$ 0"
-            style={styles.field}
-          />
-          <Pressable
-            disabled={!title || !price}
-            style={[styles.primary, (!title || !price) && styles.disabled]}
-            onPress={() => onSubmit(title, price, category)}
-          >
-            <Text style={styles.primaryText}>Publish listing</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F8F8F4" },
-  nav: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 82,
-    backgroundColor: "#FFF",
-    borderTopWidth: 1,
-    borderTopColor: "#E8EBE5",
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-  },
-  navItem: { alignItems: "center", minWidth: 54 },
-  navIcon: { color: "#83918A", fontSize: 22 },
-  navLabel: { color: "#83918A", fontSize: 10, marginTop: 3 },
-  navActive: { color: "#1D6B54" },
-  badge: {
-    position: "absolute",
-    right: -12,
-    top: -3,
-    backgroundColor: "#C3535B",
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    alignItems: "center",
-  },
-  badgeText: { color: "#FFF", fontSize: 9, fontWeight: "800" },
-  sellButton: {
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#E6F0E6",
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    gap: 4,
-  },
-  sellPlus: { color: "#247055", fontSize: 20 },
-  sellText: { color: "#247055", fontWeight: "800", fontSize: 12 },
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15,40,33,.45)",
-    justifyContent: "flex-end",
-  },
-  detail: {
-    backgroundColor: "#FFF",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: "hidden",
-  },
-  detailImage: { width: "100%", height: 230 },
-  close: {
-    position: "absolute",
-    top: 14,
-    right: 14,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#FFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeText: { color: "#173C34", fontSize: 26 },
-  detailBody: { padding: 24 },
-  detailCategory: {
-    color: "#23775D",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1.5,
-  },
-  detailTitle: {
-    color: "#173C34",
-    fontSize: 25,
-    fontWeight: "800",
-    marginTop: 8,
-  },
-  detailPrice: {
-    color: "#1C7057",
-    fontSize: 22,
-    fontWeight: "800",
-    marginTop: 8,
-  },
-  muted: { color: "#87918C", fontSize: 12 },
-  description: {
-    color: "#66736D",
-    fontSize: 14,
-    lineHeight: 21,
-    marginVertical: 20,
-  },
-  primary: {
-    height: 50,
-    backgroundColor: "#1F5D4C",
-    borderRadius: 14,
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 24,
-  },
-  primaryText: { color: "#FFF", fontWeight: "800" },
-  auth: { backgroundColor: "#FFF", borderRadius: 20, padding: 24, margin: 20 },
-  form: {
-    backgroundColor: "#FFF",
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
-  },
-  formHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  formTitle: { color: "#173C34", fontSize: 22, fontWeight: "800" },
-  authMessage: { color: "#87918C", lineHeight: 20, marginTop: 10 },
-  authError: {
-    color: "#B64950",
-    backgroundColor: "#FBECEE",
-    borderRadius: 10,
-    padding: 10,
-    fontSize: 12,
-    marginTop: 16,
-  },
-  googleButton: {
-    height: 50,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#D7DDD8",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 24,
-    gap: 10,
-  },
-  googleMark: { color: "#4285F4", fontSize: 18, fontWeight: "800" },
-  outline: {
-    height: 50,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#BCD0C3",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 12,
-  },
-  outlineText: { color: "#1F5D4C", fontWeight: "800" },
-  label: {
-    color: "#365B4C",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 18,
-    marginBottom: 7,
-  },
-  field: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: "#DDE4DC",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    color: "#173C34",
-  },
-  disabled: { opacity: 0.45 },
-});
