@@ -1,26 +1,23 @@
 {
   "expo": {
-    "name": "campus-marketplace",
-    "slug": "campus-marketplace",
-    "version": "1.0.0",
+    "name": "Campus Market - Student Hub",
+    "slug": "campus-marketplace-student-hub",
+    "scheme": "campusmarket",
+    "version": "1.1.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.nsayoo.campus-marketplace"
-    },
+    "backgroundColor": "#F4F7F8",
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+      "package": "lk.campusmarketplace.studentmarket",
+      "edgeToEdgeEnabled": true
+    },
+    "ios": {
+      "bundleIdentifier": "lk.campusmarketplace.studentmarket",
+      "supportsTablet": true
     },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "name": "Campus Market"
+    },
+    "plugins": []
   }
 }
