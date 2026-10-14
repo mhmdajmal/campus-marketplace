@@ -1,56 +1,14 @@
-import { Listing } from "./types";
-
-export const categories = [
-  "All items",
-  "Textbooks",
-  "Furniture",
-  "Tech",
-  "Fashion",
-];
-
-export const seedListings: Listing[] = [
-  {
-    id: "1",
-    title: "Calculus: Early Transcendentals",
-    price: 35,
-    category: "Textbooks",
-    seller: "Maya R.",
-    campus: "North Campus",
-    condition: "Like new",
-    image: "https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=800",
-    description: "Barely used and ready for your next math class.",
-  },
-  {
-    id: "2",
-    title: "Walnut study desk",
-    price: 80,
-    category: "Furniture",
-    seller: "Jordan K.",
-    campus: "West Village",
-    condition: "Good condition",
-    image: "https://images.unsplash.com/photo-1518455027359-f3f8164ba6bd?w=800",
-    description: "Solid walnut desk with room for a monitor and books.",
-  },
-  {
-    id: "3",
-    title: "Noise-cancelling headphones",
-    price: 120,
-    category: "Tech",
-    seller: "Alex P.",
-    campus: "East Quad",
-    condition: "Like new",
-    image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800",
-    description: "Wireless headphones with case and charging cable.",
-  },
-  {
-    id: "4",
-    title: "Vintage varsity jacket",
-    price: 45,
-    category: "Fashion",
-    seller: "Sam T.",
-    campus: "North Campus",
-    condition: "Good condition",
-    image: "https://images.unsplash.com/photo-1551488831-00ddcb6c6bd3?w=800",
-    description: "A warm, classic layer with a relaxed fit.",
-  },
+import { Category, Listing } from './types';
+export const categories: Category[] = ['Electronics','Books','Furniture','Stationery','Fashion','Other'];
+export const categoryIcons: Record<Category,string> = {
+  Electronics:'💻', Books:'📚', Furniture:'🪑', Stationery:'✏️', Fashion:'👕', Other:'📦'
+};
+const now = Date.now();
+export const demoListings: Listing[] = [
+  {id:'demo-1',title:'Casio scientific calculator',description:'Good working condition. Ideal for university studies.',price:3200,category:'Electronics',condition:'Like new',location:'Science Faculty',imageUrl:'',sellerId:'demo-s1',sellerName:'Demo Student',createdAt:now-200000,status:'active'},
+  {id:'demo-2',title:'Database Systems textbook',description:'Second-hand textbook with neat notes.',price:1500,category:'Books',condition:'Used',location:'Main Library',imageUrl:'',sellerId:'demo-s2',sellerName:'Demo Seller',createdAt:now-400000,status:'active'},
+  {id:'demo-3',title:'Wireless headphones',description:'Clean and working, comes with case.',price:4500,category:'Electronics',condition:'Like new',location:'Jaffna Campus',imageUrl:'',sellerId:'demo-s3',sellerName:'Demo Seller',createdAt:now-650000,status:'active'},
+  {id:'demo-4',title:'Study table',description:'Compact desk, pickup near campus.',price:7000,category:'Furniture',condition:'Used',location:'Hostel Area',imageUrl:'',sellerId:'demo-s4',sellerName:'Demo Student',createdAt:now-800000,status:'active'},
+  {id:'demo-5',title:'Notebook bundle',description:'Set of new notebooks and pens.',price:850,category:'Stationery',condition:'New',location:'Engineering Faculty',imageUrl:'',sellerId:'demo-s5',sellerName:'Demo Seller',createdAt:now-1100000,status:'active'},
+  {id:'demo-6',title:'Backpack for campus',description:'Durable bag with laptop compartment.',price:2500,category:'Fashion',condition:'Used',location:'Faculty Canteen',imageUrl:'',sellerId:'demo-s6',sellerName:'Demo Student',createdAt:now-1500000,status:'active'}
 ];
