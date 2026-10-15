@@ -1,28 +1,115 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function owns(userId) { return signedIn() && request.auth.uid == userId; }
-
+    function logged() { return request.auth != null; }
+    function verified() {
+      return logged() && request.auth.token.email_verified == true &&
+        request.auth.token.email is string && request.auth.token.email.matches('.*@gmail\\.com');
+    }
+    function own(uid) { return verified() && request.auth.uid == uid; }
+    function validListing(d) {
+      return d.keys().hasAll(['title','description','price','category','condition','location','imageUrl','sellerId','sellerName','createdAt','status']) &&
+        d.keys().hasOnly(['title','description','price','category','condition','location','imageUrl','sellerId','sellerName','createdAt','status']) &&
+        d.title is string && d.title.size() >= 4 && d.title.size() <= 90 &&
+        d.description is string && d.description.size() >= 10 && d.description.size() <= 1500 &&
+        d.price is number && d.price >= 0 && d.price <= 100000000 &&
+        d.category in ['Electronics','Books','Furniture','Stationery','Fashion','Other'] &&
+        d.condition in ['New','Like new','Used'] &&
+        d.location is string && d.location.size() >= 2 && d.location.size() <= 70 &&
+        d.imageUrl is string && d.imageUrl.size() <= 2048 &&
+        (d.imageUrl == '' || d.imageUrl.matches('https://.*')) &&
+        d.sellerId is string && d.sellerName is string && d.sellerName.size() <= 120 &&
+        d.createdAt is number && d.status in ['active','sold'];
+    }
     match /listings/{listingId} {
       allow read: if true;
-      allow create: if signedIn() && request.resource.data.sellerId == request.auth.uid;
-      allow update, delete: if signedIn() && resource.data.sellerId == request.auth.uid;
+      allow create: if verified() && request.resource.data.sellerId == request.auth.uid &&
+        request.resource.data.status == 'active' &&
+        request.resource.data.createdAt is number && validListing(request.resource.data);
+      allow update: if verified() && resource.data.sellerId == request.auth.uid &&
+        request.resource.data.sellerId == resource.data.sellerId &&
+        request.resource.data.sellerName == resource.data.sellerName &&
+        request.resource.data.createdAt == resource.data.createdAt && validListing(request.resource.data);
+      allow delete: if verified() && resource.data.sellerId == request.auth.uid;
     }
-
-    match /users/{userId} {
-      allow read, write: if owns(userId);
-    }
-
-    match /users/{userId}/saved/{listingId} {
-      allow read, write: if owns(userId);
-    }
-
-    match /conversations/{conversationId} {
-      allow read, write: if signedIn() && request.auth.uid in resource.data.memberIds;
-      match /messages/{messageId} {
-        allow read, create: if signedIn() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
+    match /users/{uid} {
+      allow read: if own(uid);
+      allow create: if own(uid) && request.resource.data.uid == uid &&
+        request.resource.data.email == request.auth.token.email;
+      allow update: if own(uid) && request.resource.data.uid == uid &&
+        request.resource.data.email == resource.data.email &&
+        request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+      match /saved/{listingId} {
+        allow read, delete: if own(uid);
+        allow create, update: if own(uid) && request.resource.data.listingId == listingId &&
+          exists(/databases/$(database)/documents/listings/$(listingId));
       }
+    }
+    function chatMember(chatId) {
+      return verified() &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(chatId)).data.participants;
+    }
+    match /conversations/{chatId} {
+      allow read: if verified() && request.auth.uid in resource.data.participants;
+      allow create: if verified() &&
+        request.resource.data.keys().hasOnly(['id','listingId','listingTitle','buyerId','sellerId','participants','lastMessage','updatedAt','buyerName','sellerName']) &&
+        request.resource.data.id == chatId &&
+        request.resource.data.buyerId == request.auth.uid &&
+        request.resource.data.listingId is string &&
+        request.resource.data.listingTitle is string &&
+        request.resource.data.listingTitle.size() <= 90 &&
+        request.resource.data.get('buyerName','') is string &&
+        request.resource.data.get('buyerName','').size() <= 80 &&
+        request.resource.data.get('sellerName','') is string &&
+        request.resource.data.get('sellerName','').size() <= 80 &&
+        request.resource.data.lastMessage == '' &&
+        request.resource.data.updatedAt is number &&
+        request.resource.data.participants.size() == 2 &&
+        request.resource.data.participants[0] == request.auth.uid &&
+        request.resource.data.participants[1] == request.resource.data.sellerId &&
+        request.resource.data.sellerId != request.auth.uid &&
+        request.resource.data.id == request.resource.data.listingId + '_' + request.auth.uid &&
+        exists(/databases/$(database)/documents/listings/$(request.resource.data.listingId)) &&
+        get(/databases/$(database)/documents/listings/$(request.resource.data.listingId)).data.sellerId == request.resource.data.sellerId &&
+        get(/databases/$(database)/documents/listings/$(request.resource.data.listingId)).data.status == 'active';
+      // A participant can update the preview when sending their own message.
+      // Each participant can also refresh ONLY their own public display name.
+      allow update: if chatMember(chatId) && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage','updatedAt','lastSenderId']) &&
+          request.resource.data.lastMessage is string && request.resource.data.lastMessage.size() <= 120 &&
+          request.resource.data.updatedAt is number &&
+          request.resource.data.get('lastSenderId','') == request.auth.uid) ||
+        (request.auth.uid == resource.data.buyerId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['buyerName']) &&
+          request.resource.data.buyerName is string && request.resource.data.buyerName.size() <= 80) ||
+        (request.auth.uid == resource.data.sellerId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['sellerName']) &&
+          request.resource.data.sellerName is string && request.resource.data.sellerName.size() <= 80)
+      );
+      allow delete: if false;
+      match /messages/{messageId} {
+        allow read: if chatMember(chatId);
+        allow create: if chatMember(chatId) &&
+          request.resource.data.keys().hasOnly(['senderId','text','createdAt','senderName']) &&
+          request.resource.data.get('senderName','') is string &&
+          request.resource.data.get('senderName','').size() <= 80 &&
+          request.resource.data.senderId == request.auth.uid &&
+          request.resource.data.text is string && request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 1000 &&
+          request.resource.data.createdAt is number;
+        allow update, delete: if false;
+      }
+    }
+    match /reports/{id} {
+      allow read, delete, update: if false;
+      allow create: if verified() &&
+        request.resource.data.keys().hasOnly(['listingId','reporterId','reason','createdAt']) &&
+        request.resource.data.reporterId == request.auth.uid &&
+        id == request.resource.data.listingId + '_' + request.auth.uid &&
+        request.resource.data.reason is string && request.resource.data.reason.size() > 0 &&
+        request.resource.data.reason.size() <= 200 &&
+        request.resource.data.createdAt is number;
     }
   }
 }
