@@ -1,6 +1,13 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    "noEmit": true
+  },
+  "include": [
+    "App.tsx",
+    "index.ts",
+    "src/App.tsx",
+    "src/firebaseAuth.native.ts"
+  ]
 }
